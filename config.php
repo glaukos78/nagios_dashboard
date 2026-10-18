@@ -15,6 +15,10 @@ define('NAGIOS_OBJECTS_CACHE', '/usr/local/nagios/var/objects.cache');
 // The author name that will appear in Nagios logs/comments
 define('DASHBOARD_USER', 'NOC_Dashboard_UI');
 
+// Optional command endpoint protection. Set NOC_API_TOKEN in the PHP server environment.
+define('DASHBOARD_REQUIRE_API_TOKEN', false);
+define('DASHBOARD_API_TOKEN', getenv('NOC_API_TOKEN') ?: '');
+
 // --- FOOTER SETTINGS ---
 // Ορίστε την τρέχουσα έκδοση και το όνομα του δημιουργού / ομάδας
 define('DASHBOARD_VERSION', 'v2.1.0 Enterprise');

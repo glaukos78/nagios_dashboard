@@ -1,8 +1,9 @@
 <?php
-error_reporting(0);
-ini_set('display_errors', 0);
+error_reporting(E_ALL);
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
 
-require_once 'config.php';
+require_once __DIR__ . '/config.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-cache, must-revalidate');
@@ -47,8 +48,8 @@ if (file_exists($file_path) && $handle = fopen($file_path, "r")) {
         $line = trim($line);
         if (empty($line) || $line[0] === '#') continue;
 
-        if (strpos($line, '{') !== false) {
-            $parts = explode(' ', $line); $current_block = $parts[0]; $current_data = [];
+        if (preg_match('/^(\w+)\s*\{$/', $line, $parts)) {
+            $current_block = $parts[1]; $current_data = [];
         } elseif ($line === '}') {
             if ($current_block === 'hoststatus' || $current_block === 'servicestatus') {
                 $all_statuses[] = ['type' => $current_block, 'data' => $current_data];
@@ -61,7 +62,7 @@ if (file_exists($file_path) && $handle = fopen($file_path, "r")) {
                 $comments_map[$key][] = [
                     'id' => $current_data['comment_id'] ?? '',
                     'author' => $current_data['author'] ?? 'Unknown',
-                    'text' => htmlspecialchars($current_data['comment_data'] ?? '', ENT_QUOTES, 'UTF-8'),
+                    'text' => $current_data['comment_data'] ?? '',
                     'time' => isset($current_data['entry_time']) ? date("Y-m-d H:i", (int)$current_data['entry_time']) : '',
                     'type' => $current_block
                 ];

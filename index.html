@@ -201,6 +201,24 @@
         let selectedAlerts = new Map(), knownCriticals = new Set(), isFirstLoad = true;
         let hostGroupsPopulated = false;
         let appConfigLoaded = false;
+        let apiToken = '';
+
+        async function sendNagiosCommand(payload) {
+            const send = () => fetch('cmd.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...(apiToken ? { 'X-API-Token': apiToken } : {}) },
+                body: JSON.stringify(payload)
+            });
+            let response = await send();
+            if (response.status === 401) {
+                const token = window.prompt('Enter the dashboard API token (kept only until this page is closed or reloaded):');
+                if (token !== null && token !== '') {
+                    apiToken = token;
+                    response = await send();
+                }
+            }
+            return response;
+        }
 
         const tbody = document.querySelector('#nagiosTable tbody');
         const connStatus = document.getElementById('connStatus');
@@ -231,7 +249,7 @@
                 connStatus.className = 'live-status status-paused'; connStatus.innerHTML = '<div class="live-dot"></div> Processing...';
 
                 const targets = Array.from(selectedAlerts.values());
-                const response = await fetch('cmd.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'ack', targets: targets }) });
+                const response = await sendNagiosCommand({ action: 'ack', targets: targets });
                 const result = await response.json();
 
                 if(result.status === 'success') {
@@ -282,7 +300,7 @@
                 isPaused = true;
                 connStatus.className = 'live-status status-paused'; connStatus.innerHTML = '<div class="live-dot"></div> Processing...';
 
-                const response = await fetch('cmd.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                const response = await sendNagiosCommand(payload);
                 const result = await response.json();
 
                 if(result.status === 'success') {
@@ -326,7 +344,7 @@
                 isPaused = true;
                 connStatus.className = 'live-status status-paused'; connStatus.innerHTML = '<div class="live-dot"></div> Processing...';
 
-                const response = await fetch('cmd.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'del_comment', comment_id: cId, comment_type: cType }) });
+                const response = await sendNagiosCommand({ action: 'del_comment', comment_id: cId, comment_type: cType });
                 const result = await response.json();
                 if(result.status === 'success') {
                     showToastMsg("Success", "Comment deleted! Nagios is processing...", "var(--ok-color)");
@@ -354,6 +372,44 @@
         };
 
         // --- PANEL LOGIC ---
+        function renderComments(comments) {
+            const commentsList = document.getElementById('panelCommentsList');
+            commentsList.textContent = '';
+            if (!comments || comments.length === 0) {
+                const empty = document.createElement('div');
+                empty.style.cssText = 'font-size:12px; color:var(--text-muted); padding:10px 0;';
+                empty.textContent = 'No comments for this service.';
+                commentsList.appendChild(empty);
+                return;
+            }
+            comments.forEach(c => {
+                const box = document.createElement('div');
+                box.style.cssText = 'background:var(--bg-main); padding:10px; border-radius:6px; margin-bottom:8px; border:1px solid var(--border-color);';
+                const header = document.createElement('div');
+                header.style.cssText = 'display:flex; justify-content:space-between; margin-bottom:5px; font-size:11px;';
+                const author = document.createElement('strong');
+                author.style.color = 'var(--text-main)';
+                author.textContent = c.author;
+                const time = document.createElement('span');
+                time.style.color = 'var(--text-muted)';
+                time.textContent = c.time;
+                header.append(author, time);
+
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; font-size:13px; color:var(--text-main);';
+                const text = document.createElement('span');
+                text.textContent = c.text;
+                const button = document.createElement('button');
+                button.title = 'Delete';
+                button.style.cssText = 'background:transparent; border:none; cursor:pointer; color:var(--crit-color); font-size:14px; padding:0;';
+                button.textContent = '✖';
+                button.addEventListener('click', () => deleteComment(c.id, c.type));
+                row.append(text, button);
+                box.append(header, row);
+                commentsList.appendChild(box);
+            });
+        }
+
         window.openDetails = function(encodedItem, severity) {
             const item = JSON.parse(decodeURIComponent(encodedItem));
             activeHost = item.host; activeService = item.service;
@@ -366,22 +422,7 @@
             document.getElementById('customNotifMsg').value = '';
             document.getElementById('newCommentInput').value = '';
 
-            const commentsList = document.getElementById('panelCommentsList');
-            if (item.comments && item.comments.length > 0) {
-                commentsList.innerHTML = item.comments.map(c => `
-                    <div style="background: var(--bg-main); padding: 10px; border-radius: 6px; margin-bottom: 8px; border: 1px solid var(--border-color);">
-                        <div style="display:flex; justify-content:space-between; margin-bottom: 5px; font-size:11px;">
-                            <strong style="color:var(--text-main);">${c.author}</strong> <span style="color:var(--text-muted)">${c.time}</span>
-                        </div>
-                        <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; color:var(--text-main);">
-                            <span>${c.text}</span>
-                            <button onclick="deleteComment('${c.id}', '${c.type}')" title="Delete" style="background:transparent; border:none; cursor:pointer; color:var(--crit-color); font-size:14px; padding:0;">✖</button>
-                        </div>
-                    </div>
-                `).join('');
-            } else {
-                commentsList.innerHTML = '<div style="font-size:12px; color:var(--text-muted); padding: 10px 0;">No comments for this service.</div>';
-            }
+            renderComments(item.comments);
 
             document.getElementById('sidePanel').classList.add('open'); document.getElementById('panelBackdrop').classList.add('active');
         };
@@ -417,6 +458,10 @@
         function playBeep(duration = 0.6, volume = 0.2) { if (!audioEnabled || !audioCtx) return; try { const osc = audioCtx.createOscillator(), gainNode = audioCtx.createGain(); osc.connect(gainNode); gainNode.connect(audioCtx.destination); osc.type = 'triangle'; osc.frequency.value = 750; gainNode.gain.setValueAtTime(volume, audioCtx.currentTime); osc.start(); osc.stop(audioCtx.currentTime + duration); } catch (e) {} }
 
         // --- FILTERING & RENDERING ---
+        function escapeHtml(value) {
+            return String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
         function getFilteredData(sourceArray) {
             if (!sourceArray) return [];
             const term = document.getElementById('searchInput').value.toLowerCase();
@@ -443,13 +488,13 @@
                 const ackBadge = item.ack === 1 ? `<span class="badge badge-ack">ACK</span>` : '';
 
                 const commentsBadge = (item.comments && item.comments.length > 0) ? `<span title="Has comments" style="font-size:12px; margin-left:4px; opacity:0.8;">💬 ${item.comments.length}</span>` : '';
-                const safeItem = encodeURIComponent(JSON.stringify(item));
+                const safeItem = encodeURIComponent(JSON.stringify(item)).replace(/'/g, '%27');
 
                 html += `<tr class="${rowCls} clickable-row" onclick="openDetails('${safeItem}', '${severity}')">
-                            <td style="text-align:center;" onclick="event.stopPropagation();"><input type="checkbox" class="row-checkbox" data-id="${alertId}" data-host="${item.host}" data-service="${item.service}" ${isChecked} onchange="handleCheckboxChange(this)"></td>
-                            <td><div style="font-weight:600; font-size:13px;">${item.last_check}</div></td>
-                            <td><div style="font-weight:600;">${item.host} ${ackBadge} ${commentsBadge}</div><div style="margin-top:4px;"><span class="badge ${badgeCls}">${severity}</span></div></td>
-                            <td><div style="font-weight:600;">${item.service}</div></td>
+                            <td style="text-align:center;" onclick="event.stopPropagation();"><input type="checkbox" class="row-checkbox" data-id="${escapeHtml(alertId)}" data-host="${escapeHtml(item.host)}" data-service="${escapeHtml(item.service)}" ${isChecked} onchange="handleCheckboxChange(this)"></td>
+                            <td><div style="font-weight:600; font-size:13px;">${escapeHtml(item.last_check)}</div></td>
+                            <td><div style="font-weight:600;">${escapeHtml(item.host)} ${ackBadge} ${commentsBadge}</div><div style="margin-top:4px;"><span class="badge ${badgeCls}">${severity}</span></div></td>
+                            <td><div style="font-weight:600;">${escapeHtml(item.service)}</div></td>
                             <td><div class="plugin-output">${item.plugin}</div></td>
                          </tr>`;
             }); return html;
